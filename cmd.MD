@@ -1,4 +1,4 @@
-cd /opt/data/private/networks/sketch_retrieval/ && conda activate dp
+cd /opt/data/private/networks/lvm/ && conda activate dp
 
 git pull && git status && git add . && git commit -m "change" && git push
 

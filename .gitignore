@@ -1,0 +1,56 @@
+# Python caches and build outputs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local environments and credentials
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+.netrc
+_swanlab
+.swanlab/
+
+# Training outputs, experiment tracking and model weights
+/runs/
+/output/
+/outputs/
+/saved_models/
+/checkpoints/
+/tb_logs/
+/lightning_logs/
+swanlog/
+wandb/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.log
+nohup.out
+events.out.tfevents.*
+
+# Local datasets and downloaded caches (keep src/clip tokenizer vocabulary)
+/data/
+/datasets/
+/.cache/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
