@@ -40,13 +40,16 @@ class LauncherTests(unittest.TestCase):
                 self.assertNotIn('swanlab_api_key',first['config'])
                 for path in Path(folder).glob('*/session.json'):
                     self.assertNotIn('test-secret',path.read_text())
-                with self.assertRaises(FileNotFoundError):
+                with patch('builtins.print') as printed:
                     train.main(common+['--resume','True','--seed','99'],tracker=tracker)
+                self.assertTrue(any('Starting training from scratch' in str(call) for call in printed.call_args_list))
+                self.assertNotEqual(first['id'],tracker.init.call_args.kwargs['id'])
+                self.assertEqual(tracker.init.call_args.kwargs['resume'],'allow')
                 with self.assertRaises(ValueError):
                     train.main(common+['--resume','True','--epoch','3','--batch_size','32'],tracker=tracker)
                 train.main(common,tracker=tracker)
                 self.assertNotEqual(first['id'],tracker.init.call_args.kwargs['id'])
-                self.assertEqual(len(list(Path(folder).glob('*/session.json'))),2)
+                self.assertEqual(len(list(Path(folder).glob('*/session.json'))),3)
 
 
 if __name__ == '__main__':

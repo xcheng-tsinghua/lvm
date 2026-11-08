@@ -2,6 +2,8 @@
 FG additions are a paper-guided reimplementation, not released author code.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from threading import BoundedSemaphore
 import copy
 import hashlib
 import json
@@ -16,6 +18,7 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader, Sampler
 from PIL import Image, ImageOps
 from torchvision import transforms
+from tqdm import tqdm
 
 from src.clip import clip
 from src.dataset_retrieval import unseen_classes
@@ -159,16 +162,16 @@ class Images(Dataset):
 def encode(model, paths, sketch, args):
     result = []
     loader = DataLoader(Images(paths), batch_size=args.eval_batch_size, num_workers=args.workers)
-    for i, x in enumerate(loader):
-        with torch.autocast('cuda', enabled=args.device.startswith('cuda')):
-            result.append(model(x.to(args.device), sketch).cpu())
-        if (i+1) % 50 == 0:
-            print(f'encode {"sketch" if sketch else "photo"}: {min((i+1)*args.eval_batch_size,len(paths))}/{len(paths)}', flush=True)
+    with tqdm(loader, desc=f'Encode {"sketch" if sketch else "photo"}',
+              unit='batch', dynamic_ncols=True) as progress:
+        for x in progress:
+            with torch.autocast('cuda', enabled=args.device.startswith('cuda')):
+                result.append(model(x.to(args.device), sketch).cpu())
     return torch.cat(result)
 
 
 @torch.inference_mode()
-def evaluate(model, cats, photos, sketches, args):
+def evaluate(model, cats, photos, sketches, args, writer=None):
     model.eval()
     gallery = [p for c in cats for p in photos[c]]
     queries = [s for c in cats for s in sketches[c]]
@@ -208,7 +211,7 @@ def evaluate(model, cats, photos, sketches, args):
         metrics.update(top1=float(np.mean(ranks<=1)), top5=float(np.mean(ranks<=5)),
                        macro_top1=float(np.mean([v['top1'] for v in per_class.values()])),
                        macro_top5=float(np.mean([v['top5'] for v in per_class.values()])), per_class=per_class)
-    torch.save({'query_features':qf, 'gallery_features':gf, 'queries':[str(p) for p in queries],
+    (writer.save if writer else safe_checkpoint)({'query_features':qf, 'gallery_features':gf, 'queries':[str(p) for p in queries],
                 'gallery':[str(p) for p in gallery]}, Path(args.output)/'features.pt')
     return metrics
 
@@ -243,7 +246,75 @@ def atomic_checkpoint(state, path):
     temporary.replace(path)
 
 
+def save_warning(path, exc):
+    tqdm.write(f'WARNING: Could not save {path}: {exc}. Skipping save and continuing.')
+
+
+def safe_checkpoint(state, path):
+    try:
+        atomic_checkpoint(state, path)
+        return True
+    except Exception as exc:
+        save_warning(path, exc)
+        try:
+            Path(path).with_suffix('.tmp').unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+
+
+def cpu_snapshot(value):
+    if isinstance(value, torch.Tensor):
+        return value.detach().to(device='cpu', copy=True)
+    if isinstance(value, dict):
+        return {k: cpu_snapshot(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [cpu_snapshot(v) for v in value]
+    if isinstance(value, tuple):
+        return tuple(cpu_snapshot(v) for v in value)
+    return copy.deepcopy(value)
+
+
+class AsyncWriter:
+    """Ordered disk writes with independent CPU snapshots and a bounded queue."""
+    def __init__(self):
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='checkpoint')
+        self.slots = BoundedSemaphore(4)
+
+    def save(self, state, path):
+        if not self.slots.acquire(blocking=False):
+            save_warning(path, 'background save queue is full')
+            return
+        try:
+            snapshot = cpu_snapshot(state)
+            future = self.executor.submit(safe_checkpoint, snapshot, path)
+        except Exception as exc:
+            self.slots.release()
+            save_warning(path, exc)
+            return
+        future.add_done_callback(lambda _: self.slots.release())
+
+    def close(self):
+        self.executor.shutdown(wait=True)
+
+
+def write_text_safely(path, text, append=False):
+    try:
+        with Path(path).open('a' if append else 'w', encoding='utf-8') as stream:
+            stream.write(text)
+    except OSError as exc:
+        save_warning(path, exc)
+
+
 def run(args, on_epoch=None, tracking=None):
+    writer = AsyncWriter()
+    try:
+        return _run(args, on_epoch, tracking, writer)
+    finally:
+        writer.close()
+
+
+def _run(args, on_epoch, tracking, writer):
     seed_all(args.seed)
     torch.set_num_threads(4)
     out = Path(args.output)
@@ -254,7 +325,7 @@ def run(args, on_epoch=None, tracking=None):
     manifest = {'train_classes':train_cats,'test_classes':test_cats,'photos':sum(map(len,photos.values())),
                 'sketches':sum(map(len,sketches.values())), 'args':vars(args),
                 'torch':torch.__version__, 'gpu':torch.cuda.get_device_name(0) if torch.cuda.is_available() else None}
-    (out/'manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
+    write_text_safely(out/'manifest.json', json.dumps(manifest,indent=2))
     print(json.dumps({k:v for k,v in manifest.items() if k not in ['args','train_classes','test_classes']}),flush=True)
     model = RetrievalModel(args.task, args.weights).to(args.device)
     optimizer = torch.optim.Adam([{'params':[v for n,v in model.named_parameters() if v.requires_grad and 'prompt' in n], 'lr':args.prompt_lr},
@@ -283,7 +354,7 @@ def run(args, on_epoch=None, tracking=None):
             if on_epoch and ckpt.get('pending_log'):
                 on_epoch(ckpt['record'], ckpt['metrics'])
                 ckpt['pending_log'] = False
-                atomic_checkpoint(ckpt, out/'last.pt')
+                writer.save(ckpt, out/'last.pt')
     elif args.eval_only:
         raise ValueError('--eval-only requires a trained --checkpoint')
     if not args.eval_only:
@@ -298,55 +369,61 @@ def run(args, on_epoch=None, tracking=None):
             model.train()
             sums = {}
             started = time.time()
-            for step,(s,im,n,labels) in enumerate(loader):
-                s,im,n,labels = [x.to(args.device) for x in (s,im,n,labels)]
-                optimizer.zero_grad(set_to_none=True)
-                with torch.autocast('cuda',enabled=args.device.startswith('cuda')):
-                    sf,pf,nf = model(s,True),model(im),model(n)
-                    losses = {'triplet':triplet(sf,pf,nf,args.margin)}
-                    scale = model.clip.logit_scale.exp().detach()
-                    losses['classification'] = F.cross_entropy(scale*sf@texts.T,labels)+F.cross_entropy(scale*pf@texts.T,labels)
-                    loss = losses['triplet']+0.5*losses['classification']
-                    if args.task == 'fg':
-                        losses['relative_kl'] = relative_kl(sf,pf,nf,labels)
-                        order = torch.stack([torch.randperm(4,device=args.device) for _ in range(len(s))])
-                        other = order.roll(1,dims=1)
-                        ss, pp, pn = shuffle_patches(s,order),shuffle_patches(im,order),shuffle_patches(im,other)
-                        losses['patch_triplet'] = triplet(model(ss,True),model(pp),model(pn),args.margin)
-                        loss = loss+0.1*losses['relative_kl']+losses['patch_triplet']
-                if not torch.isfinite(loss):
-                    raise RuntimeError('Nonfinite loss')
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-                losses['total'] = loss
-                for k,v in losses.items():
-                    sums[k] = sums.get(k,0)+float(v.detach())
-                if step % 20 == 0 or step+1 == steps:
-                    print(f'epoch {epoch+1}/{args.epochs} step {step+1}/{steps} loss={loss.item():.4f} elapsed={time.time()-started:.1f}s',flush=True)
+            with tqdm(loader, total=steps, desc=f'{args.task.upper()} epoch {epoch+1}/{args.epochs}',
+                      unit='batch', dynamic_ncols=True) as progress:
+                for step,(s,im,n,labels) in enumerate(progress):
+                    s,im,n,labels = [x.to(args.device) for x in (s,im,n,labels)]
+                    optimizer.zero_grad(set_to_none=True)
+                    with torch.autocast('cuda',enabled=args.device.startswith('cuda')):
+                        sf,pf,nf = model(s,True),model(im),model(n)
+                        losses = {'triplet':triplet(sf,pf,nf,args.margin)}
+                        scale = model.clip.logit_scale.exp().detach()
+                        losses['classification'] = F.cross_entropy(scale*sf@texts.T,labels)+F.cross_entropy(scale*pf@texts.T,labels)
+                        loss = losses['triplet']+0.5*losses['classification']
+                        if args.task == 'fg':
+                            losses['relative_kl'] = relative_kl(sf,pf,nf,labels)
+                            order = torch.stack([torch.randperm(4,device=args.device) for _ in range(len(s))])
+                            other = order.roll(1,dims=1)
+                            ss, pp, pn = shuffle_patches(s,order),shuffle_patches(im,order),shuffle_patches(im,other)
+                            losses['patch_triplet'] = triplet(model(ss,True),model(pp),model(pn),args.margin)
+                            loss = loss+0.1*losses['relative_kl']+losses['patch_triplet']
+                    if not torch.isfinite(loss):
+                        raise RuntimeError('Nonfinite loss')
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                    losses['total'] = loss
+                    for k,v in losses.items():
+                        sums[k] = sums.get(k,0)+float(v.detach())
+                    progress.set_postfix(loss=f'{loss.item():.4f}',
+                                         avg_loss=f'{sums["total"]/(step+1):.4f}', refresh=False)
             record = {'epoch':epoch+1,'steps':steps,'seconds':time.time()-started, **{k:v/steps for k,v in sums.items()}}
-            with (out/'train.jsonl').open('a',encoding='utf-8') as f:
-                f.write(json.dumps(record)+'\n')
-            epoch_metrics = evaluate(model,test_cats,photos,sketches,args) if on_epoch else None
+            write_text_safely(out/'train.jsonl', json.dumps(record)+'\n', append=True)
+            epoch_metrics = evaluate(model,test_cats,photos,sketches,args,writer=writer) if on_epoch else None
             state = {'task':args.task,'adapter':model.adapter(),'optimizer':optimizer.state_dict(),
                         'scaler':scaler.state_dict(),'epoch':epoch+1,'args':vars(args),
                         'tracking':tracking, 'record':record, 'metrics':epoch_metrics,
                         'pending_log':bool(on_epoch),
                         'rng':{'python':random.getstate(),'numpy':np.random.get_state(),
                                'torch':torch.get_rng_state(),'cuda':torch.cuda.get_rng_state_all()}}
-            atomic_checkpoint(state,out/'last.pt')
+            writer.save(state,out/'last.pt')
             if on_epoch:
                 on_epoch(record,epoch_metrics)
                 state['pending_log'] = False
-                atomic_checkpoint(state,out/'last.pt')
-                (out/'metrics.json').write_text(json.dumps(epoch_metrics,indent=2),encoding='utf-8')
+                writer.save(state,out/'last.pt')
+                write_text_safely(out/'metrics.json', json.dumps(epoch_metrics,indent=2))
     if on_epoch and not args.eval_only:
         metrics = epoch_metrics if start_epoch < args.epochs else ckpt['metrics']
     else:
-        metrics = evaluate(model,test_cats,photos,sketches,args)
+        metrics = evaluate(model,test_cats,photos,sketches,args,writer=writer)
     metrics['checkpoint'] = str(Path(args.checkpoint) if args.eval_only else out/'last.pt')
-    metrics['checkpoint_sha256'] = hashlib.sha256(Path(metrics['checkpoint']).read_bytes()).hexdigest()
-    (out/'metrics.json').write_text(json.dumps(metrics,indent=2),encoding='utf-8')
+    writer.close()
+    try:
+        metrics['checkpoint_sha256'] = hashlib.sha256(Path(metrics['checkpoint']).read_bytes()).hexdigest()
+    except OSError as exc:
+        metrics['checkpoint_sha256'] = None
+        tqdm.write(f'WARNING: Could not read checkpoint for checksum: {exc}')
+    write_text_safely(out/'metrics.json', json.dumps(metrics,indent=2))
     print(json.dumps({k:v for k,v in metrics.items() if k not in ['per_class','test_classes']}),flush=True)
     return metrics
 

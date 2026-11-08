@@ -33,7 +33,7 @@ def task_name(value):
 def parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument('--epoch', type=int, default=60, help='Total target epochs, including completed epochs')
-    p.add_argument('--batch_size', type=int, default=16)
+    p.add_argument('--batch_size', type=int, default=64)
     p.add_argument('--seed', type=int, default=42)
     p.add_argument('--swanlab_api_key', default='IV17QULap1Ekc1OF7mN88', help='Alternatively use SWANLAB_API_KEY or saved login')
     p.add_argument('--swanlab_project', default='Sketch_LVM')
@@ -65,7 +65,7 @@ def find_checkpoint(run_dir, expected):
         if metadata['identity'] == expected and checkpoint.is_file():
             candidates.append((checkpoint.stat().st_mtime_ns, checkpoint, metadata))
     if not candidates:
-        raise FileNotFoundError(f'No matching checkpoint under {run_dir}. Use --resume False for a new run.')
+        raise FileNotFoundError(f'No matching checkpoint under {run_dir}.')
     _, checkpoint, metadata = max(candidates,key=lambda item:item[0])
     return checkpoint, metadata
 
@@ -105,7 +105,11 @@ def main(argv=None, tracker=None):
     # Do not persist credentials in checkpoints, manifests or SwanLab config.
     safe_config = {k:str(v) if isinstance(v,Path) else v for k,v in vars(args).items() if k != 'swanlab_api_key'}
     if args.resume:
-        checkpoint, metadata = find_checkpoint(args.run_dir, expected)
+        try:
+            checkpoint, metadata = find_checkpoint(args.run_dir, expected)
+        except FileNotFoundError as exc:
+            print(f'WARNING: {exc} Starting training from scratch.', file=sys.stderr, flush=True)
+    if checkpoint is not None:
         state = sketchy.torch.load(checkpoint,map_location='cpu',weights_only=False)
         if state.get('tracking') != metadata['tracking']:
             raise ValueError('Checkpoint and session SwanLab identity mismatch')
@@ -138,7 +142,7 @@ def main(argv=None, tracker=None):
         tracker.login(api_key=key,save=False)
     tracking = metadata['tracking']
     tracker.init(project=tracking['project'],name=output.name,id=tracking['id'],
-                 resume='must' if args.resume else 'allow',mode=args.swanlab_mode,
+                 resume='must' if checkpoint is not None else 'allow',mode=args.swanlab_mode,
                  config=safe_config,log_dir=str(output/'swanlog'))
     try:
         return sketchy.run(engine,

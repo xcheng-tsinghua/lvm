@@ -1,12 +1,52 @@
 import unittest
+from threading import Event
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 import torch
-from experiments.sketchy import evaluate, relative_kl, shuffle_patches, triplet
+from experiments.sketchy import AsyncWriter, atomic_checkpoint, evaluate, relative_kl, shuffle_patches, triplet
 
 class RetrievalTests(unittest.TestCase):
+    def test_async_snapshot_and_order(self):
+        entered, release = Event(), Event()
+        saved = []
+        def slow_save(state, path):
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError('test writer did not release')
+            saved.append(state)
+        writer = AsyncWriter()
+        with patch('experiments.sketchy.atomic_checkpoint', side_effect=slow_save):
+            try:
+                state = {'tensor': torch.tensor([1.]), 'pending_log': True}
+                writer.save(state, 'unused.pt')
+                self.assertTrue(entered.wait(5))
+                state['tensor'].add_(1)
+                state['pending_log'] = False
+                writer.save(state, 'unused.pt')
+            finally:
+                release.set()
+                writer.close()
+        self.assertEqual([x['tensor'].item() for x in saved], [1., 2.])
+        self.assertEqual([x['pending_log'] for x in saved], [True, False])
+
+    def test_failed_save_preserves_checkpoint_and_next_save_runs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder)/'last.pt'
+            atomic_checkpoint({'epoch': 1}, path)
+            writer = AsyncWriter()
+            with patch('experiments.sketchy.torch.save', side_effect=OSError('disk full')):
+                with patch('experiments.sketchy.save_warning') as warning:
+                    writer.save({'epoch': 2}, path)
+                    writer.close()
+                    warning.assert_called_once()
+            self.assertEqual(torch.load(path, weights_only=False)['epoch'], 1)
+            writer = AsyncWriter()
+            writer.save({'epoch': 3}, path)
+            writer.close()
+            self.assertEqual(torch.load(path, weights_only=False)['epoch'], 3)
+
     def test_patch_shuffle_inverse(self):
         x = torch.arange(2*3*8*8).reshape(2,3,8,8)
         order = torch.tensor([[2,0,3,1],[3,2,1,0]])
