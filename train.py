@@ -40,7 +40,7 @@ def parser():
     p.add_argument('--dataset', type=str.lower, choices=['sketchy'], default='sketchy')
     p.add_argument('--resume', type=boolean, nargs='?', const=True, default=False)
     p.add_argument('--task', type=task_name, default='cl')
-    p.add_argument('--data_dir', default=r'D:\document\DataSet\sketch_retrieval\sketchy')
+    p.add_argument('--data_dir', default=r'/opt/data/private/data_set/sketch_retrieval/sketchy')
     p.add_argument('--run_dir', type=Path, default=ROOT/'runs'/'train', help='Directory searched for resumable runs')
     p.add_argument('--workers', type=int, default=0)
     p.add_argument('--eval_batch_size', type=int, default=64)

@@ -76,7 +76,7 @@ git branch valid_2026_10_26 origin/main
 
 3. 将备份分支推送到 GitHub，并强制将本地分支关联到远程同名分支
 git push -u origin valid_2026_10_26
-
+s
 # 训练除sdgraph外其他的模型
 
 python train.py --sketch_model=bidir_lstm --is_load_ckpt=False && python train.py --sketch_model=vit --is_load_ckpt=False
@@ -84,5 +84,5 @@ python train.py --sketch_model=bidir_lstm --is_load_ckpt=False && python train.p
 python train.py --sketch_model=vit --root_sever=/opt/data/private/data_set/sketch_retrieval/qmul_v2_fit/shoe --add_str=shoe --is_load_ckpt=False
 
 
-
+for task in fg cl; do for seed in 92 48 69 83 5; do CUDA_VISIBLE_DEVICES=0 python -u train.py --task "$task" --seed "$seed" --epoch 60 --batch_size 16 --workers 4 --eval_batch_size 64 --resume False || break 2; done; done
 
