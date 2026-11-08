@@ -35,7 +35,7 @@ def parser():
     p.add_argument('--epoch', type=int, default=60, help='Total target epochs, including completed epochs')
     p.add_argument('--batch_size', type=int, default=16)
     p.add_argument('--seed', type=int, default=42)
-    p.add_argument('--swanlab_api_key', default=None, help='Alternatively use SWANLAB_API_KEY or saved login')
+    p.add_argument('--swanlab_api_key', default='IV17QULap1Ekc1OF7mN88', help='Alternatively use SWANLAB_API_KEY or saved login')
     p.add_argument('--swanlab_project', default='Sketch_LVM')
     p.add_argument('--dataset', type=str.lower, choices=['sketchy'], default='sketchy')
     p.add_argument('--resume', type=boolean, nargs='?', const=True, default=False)
