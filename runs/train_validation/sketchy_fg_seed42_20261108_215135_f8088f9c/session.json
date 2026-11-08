@@ -1,0 +1,33 @@
+{
+  "identity": {
+    "dataset": "sketchy",
+    "data_dir": "d:\\document\\dataset\\sketch_retrieval\\sketchy",
+    "task": "fg",
+    "seed": 42,
+    "project": "Sketch_LVM",
+    "mode": "offline"
+  },
+  "tracking": {
+    "id": "f8088f9cc70e4f9bbe626",
+    "project": "Sketch_LVM",
+    "mode": "offline"
+  },
+  "config": {
+    "epoch": 1,
+    "batch_size": 16,
+    "seed": 42,
+    "swanlab_project": "Sketch_LVM",
+    "dataset": "sketchy",
+    "resume": false,
+    "task": "fg",
+    "data_dir": "D:\\document\\DataSet\\sketch_retrieval\\sketchy",
+    "run_dir": "runs\\train_validation",
+    "workers": 0,
+    "eval_batch_size": 64,
+    "steps_per_epoch": 1,
+    "eval_limit": 1,
+    "samples_per_class": 4,
+    "weights": "ViT-B/32",
+    "swanlab_mode": "offline"
+  }
+}

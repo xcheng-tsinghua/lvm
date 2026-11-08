@@ -1,0 +1,15 @@
+swanlab: Tracking run with swanlab version 0.10.2
+swanlab: 💾 Run data saved at 
+runs\train_validation\sketchy_fg_seed42_20261108_215135_f8088f9c\swanlog\run-20
+261108_215136-f8088f9cc70e4f9bbe626
+swanlab: ⚡️ Run `swanlab sync 
+runs\train_validation\sketchy_fg_seed42_20261108_215135_f8088f9c\swanlog\run-20
+261108_215136-f8088f9cc70e4f9bbe626` to sync this run
+{"photos": 12500, "sketches": 75481, "torch": "2.4.1+cu121", "gpu": "NVIDIA GeForce RTX 4060 Ti"}
+D:\miniconda\envs\dp\Lib\site-packages\torch\nn\functional.py:5560: UserWarning: 1Torch was not compiled with flash attention. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\builder\windows\pytorch\aten\src\ATen\native\transformers\cuda\sdp_utils.cpp:555.)
+  attn_output = scaled_dot_product_attention(q, k, v, attn_mask, dropout_p, is_causal)
+epoch 1/1 step 1/1 loss=1.3491 elapsed=0.5s
+{"queries": 21, "gallery": 2100, "limited_queries_per_class": 1, "task": "fg", "top1": 0.0, "top5": 0.09523809523809523, "macro_top1": 0.0, "macro_top5": 0.09523809523809523, "checkpoint": "runs\\train_validation\\sketchy_fg_seed42_20261108_215135_f8088f9c\\last.pt", "checkpoint_sha256": "2c6b7968e9591eba4f53831c1ae7778df98e339a237f52971876ec379ea743d3"}
+swanlab: ⚡️ Run `swanlab sync 
+runs\train_validation\sketchy_fg_seed42_20261108_215135_f8088f9c\swanlog\run-20
+261108_215136-f8088f9cc70e4f9bbe626` to sync this run
