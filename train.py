@@ -111,11 +111,18 @@ def main(argv=None, tracker=None):
             print(f'WARNING: {exc} Starting training from scratch.', file=sys.stderr, flush=True)
     if checkpoint is not None:
         state = sketchy.torch.load(checkpoint,map_location='cpu',weights_only=False)
+        incompatibilities = []
         if state.get('tracking') != metadata['tracking']:
-            raise ValueError('Checkpoint and session SwanLab identity mismatch')
+            incompatibilities.append('Checkpoint and session SwanLab identity mismatch')
         for key in ('batch_size','samples_per_class','weights','steps_per_epoch','eval_limit','workers'):
             if state['args'][key] != getattr(args,key):
-                raise ValueError(f'Resume requires the original {key}={state["args"][key]}')
+                incompatibilities.append(f'{key}: checkpoint={state["args"][key]}, requested={getattr(args,key)}')
+        if incompatibilities:
+            print(f'WARNING: Incompatible checkpoint {checkpoint}: {"; ".join(incompatibilities)}. '
+                  'Starting training from scratch.', file=sys.stderr, flush=True)
+            checkpoint = None
+            del state
+    if checkpoint is not None:
         if args.epoch <= state['epoch']:
             print(f'Checkpoint has completed {state["epoch"]} epochs; set --epoch greater than that to continue.')
             if not state.get('pending_log'):
