@@ -15,10 +15,10 @@ class LauncherTests(unittest.TestCase):
         record = {'epoch':3,'steps':10,'seconds':1,'total':.2}
         cl = train.metric_payload(record,{'task':'cl','mAP_200':.5,'P_200':.6})
         fg = train.metric_payload(record,{'task':'fg','top1':.1,'top5':.2})
-        self.assertEqual(cl['mAP@200'],.5)
-        self.assertEqual(cl['precision@200'],.6)
-        self.assertEqual(fg['Acc@1'],.1)
-        self.assertEqual(fg['Acc@5'],.2)
+        self.assertEqual(cl['test/mAP@200'],.5)
+        self.assertEqual(cl['test/precision@200'],.6)
+        self.assertEqual(fg['test/Acc@1'],.1)
+        self.assertEqual(fg['test/Acc@5'],.2)
 
     def test_new_and_resume_identity_and_secret_exclusion(self):
         with tempfile.TemporaryDirectory() as folder:

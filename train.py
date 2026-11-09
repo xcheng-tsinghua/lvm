@@ -74,9 +74,9 @@ def metric_payload(record, metrics):
     payload = {'epoch':record['epoch'], **{'train/'+k:v for k,v in record.items()
                                         if k not in ('epoch','seconds','steps')}}
     if metrics['task'] == 'cl':
-        payload.update({'mAP@200':metrics['mAP_200'], 'precision@200':metrics['P_200']})
+        payload.update({'test/mAP@200':metrics['mAP_200'], 'test/precision@200':metrics['P_200']})
     else:
-        payload.update({'Acc@1':metrics['top1'], 'Acc@5':metrics['top5']})
+        payload.update({'test/Acc@1':metrics['top1'], 'test/Acc@5':metrics['top5']})
     return payload
 
 
